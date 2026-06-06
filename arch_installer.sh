@@ -53,3 +53,51 @@ success() {
     printf "\n%s✔  Done%s\n" "$GRN" "$RST"
     sleep 1
 }
+
+# ════════════════════════════════════════════════════════════════
+#   PHASE 1 — Gather user information
+# ════════════════════════════════════════════════════════════════
+get_user_info() {
+    logo "Enter Your Account Information"
+    # ── Username ─────────────────────────────────────────────
+    while true; do
+        read -rp "  Username : " USR
+        if [[ "${USR}" =~ ^[a-z][a-z0-9_-]{0,30}$ ]]; then
+            break
+        fi
+        printf '  %sInvalid! Lowercase letters, digits, _ or - only. Must start with a letter.%s\n\n' "$RED" "$RST"
+    done
+
+    # ── User password ────────────────────────────────────────
+    while true; do
+        read -rsp "  Password for [${USR}] : " USER_PASSWD; echo
+        read -rsp "  Confirm password    : " CONF_USER_PASSWD; echo
+        if [[ "$USER_PASSWD" == "$CONF_USER_PASSWD" ]]; then
+            printf '  %s✔  User password set%s\n\n' "$GRN" "$RST"
+            break
+        fi
+        printf '  %sPasswords do not match. Try again.%s\n\n' "$RED" "$RST"
+    done
+
+    # ── Root password ────────────────────────────────────────
+    while true; do
+        read -rsp "  ROOT password       : " ROOT_PASSWD; echo
+        read -rsp "  Confirm ROOT        : " CONF_ROOT_PASSWD; echo
+        if [[ "$ROOT_PASSWD" == "$CONF_ROOT_PASSWD" ]]; then
+            printf '  %s✔  Root password set%s\n\n' "$GRN" "$RST"
+            break
+        fi
+        printf '  %sPasswords do not match. Try again.%s\n\n' "$RED" "$RST"
+    done
+
+    # ── Hostname ─────────────────────────────────────────────
+    while true; do
+        read -rp "  Hostname  : " HNAME
+        if [[ "$HNAME" =~ ^[a-z]$|^[a-z][a-z0-9_.-]{0,61}[a-z0-9]$ ]]; then
+            break
+        fi
+        printf '  %sInvalid! 1-63 chars, lowercase, digits, - or . only. Cannot start/end with symbols.%s\n\n' "$RED" "$RST"
+    done
+
+    clear
+}

@@ -139,38 +139,68 @@ partition_and_mount() {
     partx -u "${DRIVE}" 2>/dev/null || true   # refresh kernel partition table
 
     # ── Select EFI partition ─────────────────────────────────
-    logo "Select EFI Partition"
-    lsblk "${DRIVE}" -o NAME,SIZE,PARTTYPENAME
-    printf '\n'
+    while true; do
+        logo "Select EFI Partition"
+        lsblk "${DRIVE}" -o NAME,SIZE,PARTTYPENAME
+        printf '\n'
 
-    PS3="  → Choose EFI partition: "
-    select efipart in $(fdisk -l "${DRIVE}" | grep "EFI System" | awk '{print $1}'); do
-        [[ -n "$efipart" ]] && break
+        local efi_list
+        efi_list=$(lsblk -lnp -o NAME,PARTTYPE "${DRIVE}" | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print $1}')
+
+        if [[ -z "$efi_list" ]]; then
+            printf '  %sERROR: No EFI System partition found!%s\n' "$RED" "$RST"
+            printf '  Please re-partition and set Type to "EFI System".\n'
+            printf '  Press ENTER to open cfdisk again...\n'
+            read -r
+            cfdisk "${DRIVE}"
+            partx -u "${DRIVE}" 2>/dev/null || true
+            continue
+        fi
+    
+        PS3="  → Choose EFI partition: "
+        select EFI_PART in $efi_list; do
+            [[ -n "$EFI_PART" ]] && break 2
+        done
     done
 
     # ── Select Root partition ────────────────────────────────
-    logo "Select Root Partition"
-    lsblk "${DRIVE}" -o NAME,SIZE,FSTYPE,PARTTYPENAME
-    printf '\n'
+    while true; do
+        logo "Select Root Partition"
+        lsblk "${DRIVE}" -o NAME,SIZE,FSTYPE,PARTTYPENAME
+        printf '\n'
 
-    PS3="  → Choose Root partition: "
-    select ROOT_PART in $(fdisk -l "${DRIVE}" | grep "Linux filesystem" | awk '{print $1}'); do
-        [[ -n "$ROOT_PART" ]] && break
+        local root_list
+        root_list=$(lsblk -lnp -o NAME,PARTTYPE "${DRIVE}" | awk '$2=="0fc63daf-8483-4772-8e79-3d69d8477de4"{print $1}')
+
+        if [[ -z "$root_list" ]]; then
+            printf '  %sERROR: No Linux filesystem partition found!%s\n' "$RED" "$RST"
+            printf '  Please re-partition and set Type to "Linux filesystem".\n'
+            printf '  Press ENTER to open cfdisk again...\n'
+            read -r
+            cfdisk "${DRIVE}"
+            partx -u "${DRIVE}" 2>/dev/null || true
+            continue
+        fi
+    
+        PS3="  → Choose Root partition: "
+        select ROOT_PART in $root_list; do
+            [[ -n "$ROOT_PART" ]] && break 2
+        done
     done
 
     # ── Format & mount ───────────────────────────────────────
     logo "Formatting & Mounting Partitions"
 
     title "Formatting EFI  →  FAT32"
-    mkfs.fat -F32 "${EFI_PART}" >/dev/null
+    mkfs.fat -F32 "${EFI_PART}" >/dev/null || { printf '%sFormat EFI failed!%s\n' "$RED" "$RST"; exit 1; }
 
     title "Formatting Root →  ext4  (label: ArchLinux)"
-    mkfs.ext4 -L ArchLinux "${ROOT_PART}" >/dev/null
+    mkfs.ext4 -L ArchLinux "${ROOT_PART}" >/dev/null || { printf '%sFormat Root failed!%s\n' "$RED" "$RST"; exit 1; }
 
     title "Mounting Partitions"
-    mount "${ROOT_PART}" /mnt
+    mount "${ROOT_PART}" /mnt || { printf '%sMount Root failed!%s\n' "$RED" "$RST"; exit 1; }
     mkdir -p /mnt/efi
-    mount "${EFI_PART}" /mnt/efi
+    mount "${EFI_PART}" /mnt/efi || { printf '%sMount EFI failed!%s\n' "$RED" "$RST"; exit 1; }
 
     printf '\n  %s%-10s%s mounted at /mnt\n' "$GRN" "$ROOT_PART" "$RST"
     printf '  %s%-10s%s mounted at /mnt/efi\n' "$GRN" "$EFI_PART" "$RST"

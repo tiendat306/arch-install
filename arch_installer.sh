@@ -55,7 +55,7 @@ success() {
 }
 
 # ════════════════════════════════════════════════════════════════
-#   PHASE 1 — Gather user information
+#   1 — Gather user information
 # ════════════════════════════════════════════════════════════════
 get_user_info() {
     logo "Enter Your Account Information"
@@ -99,5 +99,82 @@ get_user_info() {
         printf '  %sInvalid! 1-63 chars, lowercase, digits, - or . only. Cannot start/end with symbols.%s\n\n' "$RED" "$RST"
     done
 
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   2 — Disk selection
+# ════════════════════════════════════════════════════════════════
+select_disk() {
+    logo "Select Installation Disk"
+
+    printf '  Available disks:\n\n'
+    lsblk -d -e 7,11 -o NAME,SIZE,TYPE,MODEL
+    printf '\n  ─────────────────────────────────────────────────────\n\n'
+
+    PS3="  → Choose disk (number): "
+    select DRIVE in $(lsblk -dnp -e 7,11 -o NAME); do
+        [[ -n "$DRIVE" && -b "$DRIVE" ]] && break
+    done
+    
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   3 — Partitioning, formatting and mounting
+# ════════════════════════════════════════════════════════════════
+partition_and_mount() {
+    logo "Partitioning Disk"
+
+    printf '  %sRecommended GPT layout for %s:%s\n\n' "$YLW" "$DRIVE" "$RST"
+    printf '  ┌────────────────────────────────────────────────────────┐\n'
+    printf '  │  Partition 1 :  512 MB       Type: EFI System          │\n'
+    printf '  │  Partition 2 :  Remaining    Type: Linux filesystem    │\n'
+    printf '  └────────────────────────────────────────────────────────┘\n\n'
+    printf '  cfdisk will open now. Create the layout above, then "Write" and "Quit".\n'
+    printf '  Press ENTER to continue...\n'
+    read -r
+
+    cfdisk "${DRIVE}"
+    partx -u "${DRIVE}" 2>/dev/null || true   # refresh kernel partition table
+
+    # ── Select EFI partition ─────────────────────────────────
+    logo "Select EFI Partition"
+    lsblk "${DRIVE}" -o NAME,SIZE,PARTTYPENAME
+    printf '\n'
+
+    PS3="  → Choose EFI partition: "
+    select efipart in $(fdisk -l "${DRIVE}" | grep "EFI System" | awk '{print $1}'); do
+        [[ -n "$efipart" ]] && break
+    done
+
+    # ── Select Root partition ────────────────────────────────
+    logo "Select Root Partition"
+    lsblk "${DRIVE}" -o NAME,SIZE,FSTYPE,PARTTYPENAME
+    printf '\n'
+
+    PS3="  → Choose Root partition: "
+    select ROOT_PART in $(fdisk -l "${DRIVE}" | grep "Linux filesystem" | awk '{print $1}'); do
+        [[ -n "$ROOT_PART" ]] && break
+    done
+
+    # ── Format & mount ───────────────────────────────────────
+    logo "Formatting & Mounting Partitions"
+
+    title "Formatting EFI  →  FAT32"
+    mkfs.fat -F32 "${EFI_PART}" >/dev/null
+
+    title "Formatting Root →  ext4  (label: ArchLinux)"
+    mkfs.ext4 -L ArchLinux "${ROOT_PART}" >/dev/null
+
+    title "Mounting Partitions"
+    mount "${ROOT_PART}" /mnt
+    mkdir -p /mnt/efi
+    mount "${EFI_PART}" /mnt/efi
+
+    printf '\n  %s%-10s%s mounted at /mnt\n' "$GRN" "$ROOT_PART" "$RST"
+    printf '  %s%-10s%s mounted at /mnt/efi\n' "$GRN" "$EFI_PART" "$RST"
+    success
+    
     clear
 }

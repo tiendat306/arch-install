@@ -55,6 +55,53 @@ success() {
 }
 
 # ════════════════════════════════════════════════════════════════
+#   0 — Pre-flight checks
+# ════════════════════════════════════════════════════════════════
+check_internet() {
+    logo "Checking Internet connection"
+    
+    while ! ping -c 1 archlinux.org &>/dev/null; do
+        printf '\n  %sERROR: No internet connection detected.%s\n\n' "$RED" "$RST"
+        printf '  1) Connect to WiFi (open iwctl)\n'
+        printf '  2) Retry connection check (e.g., after plugging ethernet)\n'
+        printf '  3) Exit installation\n\n'
+        read -rp "  Select an option (1-3): " net_opt
+        
+        case "$net_opt" in
+            1)
+                printf '\n  %sLaunching iwctl... Use "exit" to return to the installer after connecting.%s\n' "$YLW" "$RST"
+                sleep 2
+                iwctl
+                ;;
+            2)
+                printf '\n  Retrying ping...\n'
+                sleep 1
+                ;;
+            3|*)
+                printf '\n  Exiting installer.\n\n'
+                exit 1
+                ;;
+        esac
+    done
+    
+    printf '  %s✔  Internet OK%s\n' "$GRN" "$RST"
+    sleep 1
+    clear
+}
+
+check_uefi() {
+    logo "Checking Boot Mode"
+    if [ ! -d /sys/firmware/efi/efivars ]; then
+        printf '\n  %sERROR: This script requires UEFI mode.\n' "$RED"
+        printf '  Boot the USB in UEFI mode (check BIOS settings).%s\n\n' "$RST"
+        exit 1
+    fi
+    printf '  %s✔  UEFI mode confirmed%s\n' "$GRN" "$RST"
+    sleep 1
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
 #   1 — Gather user information
 # ════════════════════════════════════════════════════════════════
 get_user_info() {
@@ -208,3 +255,14 @@ partition_and_mount() {
     
     clear
 }
+
+# ════════════════════════════════════════════════════════════════
+#   MAIN — Execution order
+# ════════════════════════════════════════════════════════════════
+check_internet
+check_uefi
+
+get_user_info
+
+select_disk
+partition_and_mount

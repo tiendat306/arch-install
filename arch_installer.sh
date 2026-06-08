@@ -204,10 +204,18 @@ partition_and_mount() {
             continue
         fi
     
-        PS3="  → Choose EFI partition: "
-        select EFI_PART in $efi_list; do
-            [[ -n "$EFI_PART" ]] && break 2
-        done
+        local efi_arr=($efi_list)
+        if [[ ${#efi_arr[@]} -eq 1 ]]; then
+            EFI_PART="${efi_arr[0]}"
+            printf '  %sAutomatically selected EFI partition: %s%s\n' "$GRN" "$EFI_PART" "$RST"
+            sleep 1
+            break
+        else
+            PS3="  → Choose EFI partition: "
+            select EFI_PART in $efi_list; do
+                [[ -n "$EFI_PART" ]] && break 2
+            done
+        fi
     done
 
     # ── Select Root partition ────────────────────────────────
@@ -229,10 +237,18 @@ partition_and_mount() {
             continue
         fi
     
-        PS3="  → Choose Root partition: "
-        select ROOT_PART in $root_list; do
-            [[ -n "$ROOT_PART" ]] && break 2
-        done
+        local root_arr=($root_list)
+        if [[ ${#root_arr[@]} -eq 1 ]]; then
+            ROOT_PART="${root_arr[0]}"
+            printf '  %sAutomatically selected Root partition: %s%s\n' "$GRN" "$ROOT_PART" "$RST"
+            sleep 1
+            break
+        else
+            PS3="  → Choose Root partition: "
+            select ROOT_PART in $root_list; do
+                [[ -n "$ROOT_PART" ]] && break 2
+            done
+        fi
     done
 
     # ── Format & mount ───────────────────────────────────────
@@ -252,6 +268,7 @@ partition_and_mount() {
     printf '\n  %s%-10s%s mounted at /mnt\n' "$GRN" "$ROOT_PART" "$RST"
     printf '  %s%-10s%s mounted at /mnt/efi\n' "$GRN" "$EFI_PART" "$RST"
     success
+    sleep 3
     
     clear
 }

@@ -60,7 +60,15 @@ warning_msg() {
     printf '%s%s%s %s\n' "${BOLD}" "${YLW}" "${1:?}" "${RST}"
 }
 error_msg() {
-    printf '%s%s ERROR: %s %s\n' "${BOLD}" "${RED}" "${1:?}" "${RST}" >&2
+    printf '%s%s[ERROR]: %s %s\n' "${BOLD}" "${RED}" "${1:?}" "${RST}" >&2
+}
+
+refresh_partitions() {
+    local dev="${1:?}"
+
+    # Force kernel to reread partition table and wait for udev to populate device nodes (prevents detection lag)
+    partprobe "${dev}" 2>/dev/null || partx -u "${dev}" 2>/dev/null || true
+    udevadm settle 2>/dev/null || true
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -138,7 +146,7 @@ get_user_info() {
         read -rsp " - ROOT password : " ROOT_PASSWD; echo
         read -rsp " - Confirm ROOT password : " CONF_ROOT_PASSWD; echo
         if [[ "$ROOT_PASSWD" == "$CONF_ROOT_PASSWD" ]]; then
-            success_msg "Password configured successfully for root"
+            success_msg "Password configured successfully for root."
             printf '\n'
             break
         fi
@@ -164,7 +172,7 @@ get_user_info() {
         read -rsp " - User password : " USER_PASSWD; echo
         read -rsp " - Confirm user password : " CONF_USER_PASSWD; echo
         if [[ "$USER_PASSWD" == "$CONF_USER_PASSWD" ]]; then
-            success_msg "Password configured successfully for user [${USR}]"
+            success_msg "Password configured successfully for user [${USR}]."
             printf '\n'
             break
         fi
@@ -191,7 +199,7 @@ select_disk() {
     PS3="→ Selection (number) : "
     select DRIVE in $(lsblk -dnp -e 7,11 -o NAME); do
         if [[ -n "$DRIVE" && -b "$DRIVE" ]]; then
-            success_msg "Selected installation disk: $DRIVE"
+            success_msg "Selected installation disk: $DRIVE."
             break
         else
             error_msg "Invalid selection! Please choose a valid disk number from the list."
@@ -219,7 +227,7 @@ partition_and_mount() {
     read -r
 
     cfdisk "${DRIVE}"
-    partx -u "${DRIVE}" 2>/dev/null || true   # refresh kernel partition table
+    refresh_partitions "${DRIVE}"
 
     # ── Select EFI partition ─────────────────────────────────
     while true; do
@@ -236,7 +244,7 @@ partition_and_mount() {
             warning_msg 'Press ENTER to open cfdisk again...'
             read -r
             cfdisk "${DRIVE}"
-            partx -u "${DRIVE}" 2>/dev/null || true
+            refresh_partitions "${DRIVE}"
             continue
         fi
     
@@ -273,7 +281,7 @@ partition_and_mount() {
             warning_msg 'Press ENTER to open cfdisk again...\n'
             read -r
             cfdisk "${DRIVE}"
-            partx -u "${DRIVE}" 2>/dev/null || true
+            refresh_partitions "${DRIVE}"
             continue
         fi
     

@@ -63,14 +63,6 @@ error_msg() {
     printf '%s%s[ERROR]: %s %s\n' "${BOLD}" "${RED}" "${1:?}" "${RST}" >&2
 }
 
-refresh_partitions() {
-    local dev="${1:?}"
-
-    # Force kernel to reread partition table and wait for udev to populate device nodes (prevents detection lag)
-    partprobe "${dev}" 2>/dev/null || partx -u "${dev}" 2>/dev/null || true
-    udevadm settle 2>/dev/null || true
-}
-
 # ════════════════════════════════════════════════════════════════
 #   0 — Pre-flight checks
 # ════════════════════════════════════════════════════════════════
@@ -137,7 +129,7 @@ get_user_info() {
             printf '\n'
             break
         fi
-        error_msg "Invalid hostname! Must be 1-63 chars, lowercase letters, digits, - or ., and cannot start/end with symbols"
+        error_msg "Invalid hostname! Must be 1-63 chars, lowercase letters, digits, - or ., and cannot start/end with symbols."
         printf '\n'
     done
     # ── Root password ────────────────────────────────────────
@@ -162,7 +154,7 @@ get_user_info() {
             printf '\n'
             break
         fi
-        error_msg "Invalid username! Must start with a lowercase letter and contain only a-z, 0-9, _ or - (max 32 chars)"
+        error_msg "Invalid username! Must start with a lowercase letter and contain only a-z, 0-9, _ or - (max 32 chars)."
         printf '\n'
     done
 
@@ -213,6 +205,54 @@ select_disk() {
 # ════════════════════════════════════════════════════════════════
 #   3 — Partitioning, formatting and mounting
 # ════════════════════════════════════════════════════════════════
+select_partition() {
+    local drive="${1:?}"
+    local label="${2:?}"           # "EFI" or "Root"
+    local type_desc="${3:?}"       # "EFI System" or "Linux filesystem"
+    local gpt_uuid="${4:?}"        # GPT partition type UUID
+    local -n out_var="${5:?}"      # nameref pointing to return variable (e.g. EFI_PART or ROOT_PART)
+
+    while true; do
+        info_msg "Select ${label} partition"
+        lsblk "${drive}" -o NAME,SIZE,FSTYPE,PARTTYPENAME
+        printf '\n'
+
+        local part_list
+        part_list=$(lsblk -lnp -o NAME,PARTTYPE "${drive}" | awk -v gpt="${gpt_uuid}" '$2==gpt{print $1}')
+
+        if [[ -z "$part_list" ]]; then
+            error_msg "No ${type_desc} partition found!"
+            warning_msg "Please re-partition and set Type to \"${type_desc}\""
+            warning_msg "Press ENTER to open cfdisk again..."
+            read -r
+            cfdisk "${drive}"
+            
+            # Force kernel to reread partition table and wait for udev to populate device nodes (prevents detection lag)
+            partprobe "${drive}" 2>/dev/null || partx -u "${drive}" 2>/dev/null || true
+            udevadm settle 2>/dev/null || true
+            continue
+        fi
+    
+        local part_arr=($part_list)
+        if [[ ${#part_arr[@]} -eq 1 ]]; then
+            out_var="${part_arr[0]}"
+            success_msg "Automatically selected ${label} partition: ${out_var}."
+            sleep 2
+            break
+        else
+            PS3="  → Choose ${label} partition: "
+            select choice in $part_list; do
+                if [[ -n "$choice" ]]; then
+                    out_var="${choice}"
+                    success_msg "Selected ${label} partition: ${out_var}."
+                    sleep 1
+                    break 2
+                fi
+            done
+        fi
+    done
+}
+
 partition_and_mount() {
     display_logo
     info_msg "Partitioning disk"
@@ -227,81 +267,16 @@ partition_and_mount() {
     read -r
 
     cfdisk "${DRIVE}"
-    refresh_partitions "${DRIVE}"
+    
+    # Force kernel to reread partition table and wait for udev to populate device nodes (prevents detection lag)
+    partprobe "${DRIVE}" 2>/dev/null || partx -u "${DRIVE}" 2>/dev/null || true
+    udevadm settle 2>/dev/null || true
 
     # ── Select EFI partition ─────────────────────────────────
-    while true; do
-        info_msg "Select EFI partition"
-        lsblk "${DRIVE}" -o NAME,SIZE,PARTTYPENAME
-        printf '\n'
-
-        local efi_list
-        efi_list=$(lsblk -lnp -o NAME,PARTTYPE "${DRIVE}" | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print $1}')
-
-        if [[ -z "$efi_list" ]]; then
-            error_msg "No EFI System partition found!"
-            warning_msg 'Please re-partition and set Type to "EFI System"'
-            warning_msg 'Press ENTER to open cfdisk again...'
-            read -r
-            cfdisk "${DRIVE}"
-            refresh_partitions "${DRIVE}"
-            continue
-        fi
-    
-        local efi_arr=($efi_list)
-        if [[ ${#efi_arr[@]} -eq 1 ]]; then
-            EFI_PART="${efi_arr[0]}"
-            success_msg "Automatically selected EFI partition: ${EFI_PART}"
-            sleep 2
-            break
-        else
-            PS3="  → Choose EFI partition: "
-            select EFI_PART in $efi_list; do
-                if [[ -n "$EFI_PART" ]]; then
-                    success_msg "Selected EFI partition: ${EFI_PART}"
-                    sleep 1
-                    break 2
-                fi
-            done
-        fi
-    done
+    select_partition "${DRIVE}" "EFI" "EFI System" "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" EFI_PART
 
     # ── Select Root partition ────────────────────────────────
-    while true; do
-        info_msg "Select Root partition"
-        lsblk "${DRIVE}" -o NAME,SIZE,FSTYPE,PARTTYPENAME
-        printf '\n'
-
-        local root_list
-        root_list=$(lsblk -lnp -o NAME,PARTTYPE "${DRIVE}" | awk '$2=="0fc63daf-8483-4772-8e79-3d69d8477de4"{print $1}')
-
-        if [[ -z "$root_list" ]]; then
-            error_msg "No Linux filesystem partition found!"
-            warning_msg 'Please re-partition and set Type to "Linux filesystem".\n'
-            warning_msg 'Press ENTER to open cfdisk again...\n'
-            read -r
-            cfdisk "${DRIVE}"
-            refresh_partitions "${DRIVE}"
-            continue
-        fi
-    
-        local root_arr=($root_list)
-        if [[ ${#root_arr[@]} -eq 1 ]]; then
-            ROOT_PART="${root_arr[0]}"
-            success_msg "Automatically selected Root partition: ${ROOT_PART}"
-            sleep 2
-            break
-        else
-            PS3="  → Choose Root partition: "
-            select ROOT_PART in $root_list; do
-                if [[ -n "$ROOT_PART" ]]; then
-                    success_msg "Selected Root partition: ${ROOT_PART}"
-                    sleep 1
-                    break 2
-                fi
-            done
-        fi
-    done
+    select_partition "${DRIVE}" "Root" "Linux filesystem" "0fc63daf-8483-4772-8e79-3d69d8477de4" ROOT_PART
 
     # ── Format & mount ───────────────────────────────────────
     info_msg "Formatting & Mounting Partitions"
@@ -320,7 +295,7 @@ partition_and_mount() {
     printf '\n'
     success_msg "${ROOT_PART} mounted at /mnt"
     success_msg "${EFI_PART} mounted at /mnt/efi"
-    success_msg "All partitions formatted and mounted successfully"
+    success_msg "All partitions formatted and mounted successfully."
     warning_msg 'Press ENTER to continue...'
     read -r
     

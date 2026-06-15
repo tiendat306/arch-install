@@ -303,6 +303,197 @@ partition_and_mount() {
 }
 
 # ════════════════════════════════════════════════════════════════
+#   4 — Install base system
+# ════════════════════════════════════════════════════════════════
+
+install_base_system() {
+    display_logo
+    info_msg "Install base system"
+    
+    processing_msg "Configuring pacman (color, parallel downloads)..."
+    sed -i \
+        's/#Color/Color/;
+         s/#ParallelDownloads = 5/ParallelDownloads = 5/;
+         /^ParallelDownloads =/a ILoveCandy' \
+        /etc/pacman.conf
+    sleep 1
+
+    processing_msg "Updating pacman mirrors via reflector (VN/SG/JP)..."
+    reflector --verbose --latest 10 \
+              --country "Vietnam,Singapore,Japan" \
+              --sort rate \
+              --save /etc/pacman.d/mirrorlist >/dev/null 2>&1
+    sleep 1
+
+    processing_msg "Running pacstrap to install base packages..."
+    sleep 1
+    pacstrap /mnt \
+        base base-devel \
+        "${KERNEL}" linux-firmware intel-ucode \
+        mkinitcpio \
+        networkmanager \
+        reflector \
+        zsh git vim \
+        zram-generator
+
+    success_msg "Base system packages installed successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   5 — Generate fstab
+# ════════════════════════════════════════════════════════════════
+gen_fstab() {
+    display_logo
+    info_msg "Generate fstab"
+    
+    genfstab -U /mnt >> /mnt/etc/fstab
+    success_msg "fstab generated and written to /mnt/etc/fstab successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   6 — Configure localization
+# ════════════════════════════════════════════════════════════════
+
+configure_localization() {
+    display_logo
+    info_msg "Configure localization"
+    
+    # Set the timezone and sync the hardware clock
+    processing_msg "Setting timezone to ${TIMEZONE}..."
+    $CHROOT ln -sf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+    $CHROOT hwclock --systohc
+    sleep 1
+
+    # Configure locales (enable specified locale and generate it)
+    processing_msg "Configuring locales (${LOCALE})..."
+    echo "${LOCALE} UTF-8" >> /mnt/etc/locale.gen
+    $CHROOT locale-gen >/dev/null
+    echo "LANG=${LOCALE}" > /mnt/etc/locale.conf
+    sleep 1
+
+    # Configure keyboard layout and console font
+    processing_msg "Setting console keyboard layout to ${KEYMAP}..."
+    printf 'KEYMAP=%s\nFONT=Lat2-Terminus16\n' "$KEYMAP" > /mnt/etc/vconsole.conf
+    sleep 1
+    
+    success_msg "Localization configured successfully."
+    sleep 2
+    
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   7 — Configure network identity
+# ════════════════════════════════════════════════════════════════
+
+configure_network_identity() {
+    display_logo
+    info_msg "Configure network identity"
+
+    # Set system hostname and configure /etc/hosts
+    processing_msg "Setting hostname to ${HNAME} and configuring hosts..."
+    echo "${HNAME}" > /mnt/etc/hostname
+    cat >> /mnt/etc/hosts <<- EOL
+		127.0.0.1   localhost
+		::1         localhost
+		127.0.1.1   ${HNAME}.localdomain ${HNAME}
+	EOL
+    success_msg "Network identity configured successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   8 — Create user accounts
+# ════════════════════════════════════════════════════════════════
+create_users() {
+    display_logo
+    info_msg "Create user accounts"
+
+    # Set root password
+    processing_msg "Configuring password for root administrator..."
+    echo "root:${ROOT_PASSWD}" | $CHROOT chpasswd
+    sleep 1
+
+    # Create personal user account and add to essential groups
+    processing_msg "Creating user account [${USR}] with wheel, audio, video, storage groups..."
+    $CHROOT useradd -m -g users -G wheel,audio,video,storage -s /usr/bin/zsh "${USR}"
+    echo "${USR}:${USER_PASSWD}" | $CHROOT chpasswd
+    sleep 1
+
+    # Configure sudo privileges: temporarily allow wheel group group members to run sudo without password
+    # (used during installation, will be reverted before final reboot)
+    processing_msg "Configuring temporary NOPASSWD sudo privileges for wheel group..."
+    sed -i \
+        's/# %wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' \
+        /mnt/etc/sudoers
+    echo 'Defaults insults' >> /mnt/etc/sudoers
+    sleep 1
+
+    success_msg "User accounts and passwords configured successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   9 — Install GRUB bootloader
+# ════════════════════════════════════════════════════════════════
+install_grub() {
+    display_logo
+    info_msg "Install GRUB Bootloader"
+
+    # Install GRUB and other bootloader utilities
+    processing_msg "Installing grub, efibootmgr, and os-prober packages..."
+    $CHROOT pacman -S grub efibootmgr os-prober --noconfirm >/dev/null
+    sleep 1
+
+    # Install GRUB onto the EFI partition
+    processing_msg "Installing GRUB bootloader to /efi (UEFI)..."
+    $CHROOT grub-install \
+        --target=x86_64-efi \
+        --efi-directory=/efi \
+        --bootloader-id=ArchLinux
+    sleep 1
+
+    # Configure GRUB settings (disable watchdog, optimizations, enable os-prober)
+    processing_msg "Optimizing /etc/default/grub settings..."
+    sed -i \
+        's/quiet/nowatchdog mitigations=off zswap.enabled=0 transparent_hugepage=madvise/;
+         s/#GRUB_DISABLE_OS_PROBER/GRUB_DISABLE_OS_PROBER/' \
+        /mnt/etc/default/grub
+    sleep 1
+
+    # Load GPU kernel modules early in initramfs for early Kernel Mode Setting (KMS)
+    processing_msg "Adding i915 module to /etc/mkinitcpio.conf..."
+    sed -i "s/MODULES=()/MODULES=(i915)/" /mnt/etc/mkinitcpio.conf
+    sleep 1
+
+    # Regenerate initramfs images for the new kernel setup
+    processing_msg "Regenerating initramfs images (mkinitcpio)..."
+    $CHROOT mkinitcpio -P
+    sleep 1
+
+    # Generate GRUB configuration file
+    processing_msg "Generating grub.cfg..."
+    echo
+    $CHROOT grub-mkconfig -o /boot/grub/grub.cfg
+    sleep 1
+
+    success_msg "GRUB bootloader installed and configured successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
 #   MAIN — Execution order
 # ════════════════════════════════════════════════════════════════
 run_preflight_checks
@@ -311,3 +502,10 @@ get_user_info
 
 select_disk
 partition_and_mount
+
+install_base_system
+gen_fstab
+configure_localization
+configure_network_identity
+create_users
+install_grub

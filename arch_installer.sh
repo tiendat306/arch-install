@@ -494,6 +494,230 @@ install_grub() {
 }
 
 # ════════════════════════════════════════════════════════════════
+#   10 — Refresh package mirrors inside chroot
+# ════════════════════════════════════════════════════════════════
+refresh_mirrors() {
+    display_logo
+    info_msg "Refresh Package Mirrors"
+
+    # Configure pacman inside the new installation (enable color and parallel downloads)
+    processing_msg "Configuring pacman inside the target system..."
+    sed -i \
+        's/#Color/Color/;
+         s/#ParallelDownloads = 5/ParallelDownloads = 5/;
+         /^ParallelDownloads =/a ILoveCandy' \
+        /mnt/etc/pacman.conf
+    sleep 1
+
+    # Find the fastest mirrors for the target system in Vietnam, Singapore, and Japan
+    processing_msg "Selecting fastest package mirrors inside chroot (reflector)..."
+    $CHROOT reflector --verbose --latest 10 \
+        --country "Vietnam,Singapore,Japan" \
+        --sort rate \
+        --save /etc/pacman.d/mirrorlist >/dev/null 2>&1
+    sleep 1
+
+    # Sync package databases using the newly optimized mirrors
+    processing_msg "Syncing package databases (pacman -Syy)..."
+    echo
+    $CHROOT pacman -Syy --noconfirm
+    sleep 1
+
+    success_msg "Package mirrors refreshed and synced successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   11 — Configure zram swap
+# ════════════════════════════════════════════════════════════════
+configure_zram() {
+    display_logo
+    info_msg "Configure zram swap"
+
+    # Create the zram-generator configuration file
+    # Set size to half of physical RAM, compression to lz4, and priority to 100
+    processing_msg "Creating zram-generator.conf file..."
+    cat > /mnt/etc/systemd/zram-generator.conf <<- 'EOL'
+		[zram0]
+		zram-size = ram / 2
+		compression-algorithm = lz4
+		swap-priority = 100
+		fs-type = swap
+	EOL
+    sleep 1
+
+    success_msg "zram swap configured successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   12 — Apply performance and SSD optimizations
+# ════════════════════════════════════════════════════════════════
+optimize_system_performance() {
+    display_logo
+    info_msg "Apply Performance Optimizations"
+
+    # Optimize ext4 partition settings for SSD durability and speed
+    processing_msg "Configuring ext4 mount options and fast_commit in fstab..."
+    sed -i '0,/relatime/s/relatime/noatime,commit=120/' /mnt/etc/fstab
+    $CHROOT tune2fs -O fast_commit "${ROOT_PART}" >/dev/null
+    sleep 1
+
+    # Configure makepkg compiler flags (optimize for native CPU and use all threads)
+    processing_msg "Optimizing makepkg compiler flags for compilation..."
+    local nproc_val
+    nproc_val=$(nproc)
+    sed -i \
+        "s/march=x86-64/march=native/;
+         s/mtune=generic/mtune=native/;
+         s/-O2/-O3/;
+         s/#MAKEFLAGS=\"-j2/MAKEFLAGS=\"-j${nproc_val}\"/" \
+        /mnt/etc/makepkg.conf
+    sleep 1
+
+    # Set CPU governor to performance mode
+    processing_msg "Configuring CPU governor to performance mode..."
+    $CHROOT pacman -S cpupower --noconfirm >/dev/null
+    sed -i "s/#governor='ondemand'/governor='performance'/" \
+        /mnt/etc/default/cpupower
+    sleep 1
+
+    # Set I/O scheduler to mq-deadline for SSDs
+    processing_msg "Configuring udev rules for SSD I/O scheduler..."
+    cat >> /mnt/etc/udev/rules.d/60-ssd.rules <<- 'EOL'
+		ACTION=="add|change", KERNEL=="sd[a-z]*|nvme[0-9]*n[0-9]*", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
+	EOL
+    sleep 1
+
+    # Tune virtual memory (swappiness, cache pressure, and dirty ratios)
+    processing_msg "Tuning kernel sysctl virtual memory parameters..."
+    cat >> /mnt/etc/sysctl.d/99-performance.conf <<- 'EOL'
+		vm.swappiness=5
+		vm.vfs_cache_pressure=50
+		vm.dirty_ratio=10
+		vm.dirty_background_ratio=5
+		vm.page-cluster=0
+	EOL
+    sleep 1
+
+    # Configure Cloudflare DNS in NetworkManager
+    processing_msg "Configuring Cloudflare DNS as default fallback..."
+    mkdir -p /mnt/etc/NetworkManager/conf.d
+    cat >> /mnt/etc/NetworkManager/conf.d/dns-servers.conf <<- 'EOL'
+		[global-dns-domain-*]
+		servers=1.1.1.1,1.0.0.1
+	EOL
+    sleep 1
+
+    # Set systemd-journal to volatile memory and limit size to 64MB to reduce SSD writes
+    processing_msg "Configuring systemd journald to use volatile storage..."
+    sed -i \
+        's/#Storage=auto/Storage=volatile/;
+         s/#RuntimeMaxUse=/RuntimeMaxUse=64M/' \
+        /mnt/etc/systemd/journald.conf
+    sleep 1
+
+    # Blacklist unnecessary kernel modules to speed up boot times
+    ## 1. Disable Intel TCO hardware watchdog timer (unnecessary for personal PCs)
+    ## 2. Disable legacy PS/2 mouse emulation driver (modern systems use evdev/libinput)
+    ## 3. Disable emulation of Apple Mac single-button mouse button mapping
+    processing_msg "Blacklisting unnecessary kernel modules..."
+    cat >> /mnt/etc/modprobe.d/blacklist.conf <<- 'EOL'
+		blacklist iTCO_wdt
+		blacklist mousedev
+		blacklist mac_hid
+	EOL
+    sleep 1
+
+    # Mask unused systemd services to reduce memory usage and speed up boot
+    processing_msg "Masking unused systemd services..."
+    $CHROOT systemctl mask lvm2-monitor.service systemd-random-seed.service >/dev/null 2>&1
+    sleep 1
+
+    success_msg "Performance optimizations applied successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   13 — Install GPU drivers and Xorg graphics server (Intel)
+# ════════════════════════════════════════════════════════════════
+install_graphics_drivers() {
+    display_logo
+    info_msg "Install GPU Drivers & Xorg"
+
+    # Install Xorg server, essential utilities, and Mesa/Vulkan drivers for Intel UHD Graphics
+    processing_msg "Installing Xorg server, utilities, and Intel graphics drivers..."
+    sleep 1
+    $CHROOT pacman -S \
+        xorg-server \
+        xorg-xinput xorg-xrdb xorg-xsetroot xorg-xkill xorg-xdpyinfo xorg-xwininfo \
+        xf86-video-intel \
+        mesa \
+        vulkan-intel \
+        intel-media-driver \
+        libva-intel-driver \
+        libvdpau-va-gl \
+        --noconfirm >/dev/null
+    success_msg "Xorg and Intel graphics drivers installed successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   14 — Install audio stack (PipeWire)
+# ════════════════════════════════════════════════════════════════
+install_audio_stack() {
+    display_logo
+    info_msg "Install Audio Stack"
+
+    # Install PipeWire, session manager (wireplumber), GUI mixer (pavucontrol), and ALSA utilities
+    processing_msg "Installing PipeWire, WirePlumber, and pavucontrol..."
+    $CHROOT pacman -S \
+        pipewire pipewire-pulse pipewire-alsa pipewire-jack \
+        wireplumber \
+        pavucontrol \
+        alsa-utils \
+        --noconfirm >/dev/null
+    sleep 1
+
+    success_msg "PipeWire audio stack installed successfully."
+    sleep 2
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   15 — Install multimedia codecs and archive utilities
+# ════════════════════════════════════════════════════════════════
+install_codecs_and_utilities() {
+    display_logo
+    info_msg "Install Codecs & Utilities"
+
+    # Install video/audio codecs, image libraries, archive utils, and system utilities
+    processing_msg "Installing multimedia codecs and archiving tools..."
+    $CHROOT pacman -S \
+        ffmpeg ffmpegthumbnailer \
+        aom libde265 x265 x264 libmpeg2 xvidcore libtheora libvpx sdl \
+        jasper openjpeg2 libwebp webp-pixbuf-loader imagemagick \
+        unarchiver lrzip lzip p7zip lbzip2 lzop cpio unrar unzip zip \
+        xdg-utils xdg-user-dirs \
+        --noconfirm >/dev/null
+    sleep 1
+
+    success_msg "Codecs and archive utilities installed successfully."
+    sleep 2
+    
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
 #   MAIN — Execution order
 # ════════════════════════════════════════════════════════════════
 run_preflight_checks
@@ -509,3 +733,11 @@ configure_localization
 configure_network_identity
 create_users
 install_grub
+
+refresh_mirrors
+configure_zram
+optimize_system_performance
+
+install_graphics_drivers
+install_audio_stack
+install_codecs_and_utilities

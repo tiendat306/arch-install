@@ -713,7 +713,30 @@ install_codecs_and_utilities() {
 
     success_msg "Codecs and archive utilities installed successfully."
     sleep 2
-    
+
+    clear
+}
+
+# ════════════════════════════════════════════════════════════════
+#   16 — Install storage system drivers and mount utilities
+# ════════════════════════════════════════════════════════════════
+install_storage_and_mount_utils() {
+    display_logo
+    info_msg "Install Storage & Mount Utils"
+
+    # Install filesystem tools (fat/ntfs), gvfs mounting daemons, MTP tools, hardware utilities, and GTK theme assets
+    processing_msg "Installing filesystem drivers, gvfs, and mount utilities..."
+    $CHROOT pacman -S \
+        dosfstools ntfs-3g \
+        gvfs gvfs-mtp gvfs-nfs \
+        libmtp usbutils net-tools \
+        gnome-themes-extra \
+        --noconfirm >/dev/null
+    sleep 1
+
+    success_msg "Storage and mount utilities installed successfully."
+    sleep 2
+	
     clear
 }
 
@@ -741,3 +764,4 @@ optimize_system_performance
 install_graphics_drivers
 install_audio_stack
 install_codecs_and_utilities
+install_storage_and_mount_utils

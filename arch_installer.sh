@@ -443,7 +443,7 @@ configure_localization() {
 
 configure_network_identity() {
     display_logo
-    info_msg "Configure network identity"
+    info_msg "Configure network identity and services"
 
     # Set system hostname and configure /etc/hosts
     processing_msg "Setting hostname to ${HNAME} and configuring hosts..."
@@ -454,9 +454,24 @@ configure_network_identity() {
 		::1         localhost
 		127.0.1.1   ${HNAME}.localdomain ${HNAME}
 	EOL
+    sleep 1
+
+    # Configure Cloudflare DNS in NetworkManager
+    processing_msg "Configuring Cloudflare DNS as default fallback..."
+    mkdir -p /mnt/etc/NetworkManager/conf.d
+    cat >> /mnt/etc/NetworkManager/conf.d/dns-servers.conf <<- 'EOL'
+		[global-dns-domain-*]
+		servers=1.1.1.1,1.0.0.1
+	EOL
+    sleep 1
+
+    # Enable NetworkManager service to manage network interfaces on boot
+    processing_msg "Enabling NetworkManager service..."
+    log_command "Enabling NetworkManager" $CHROOT systemctl enable NetworkManager.service
+    sleep 1
 
     printf '\n'
-    success_msg "Network identity configured successfully."
+    success_msg "Network settings configured successfully."
     sleep 2
 
     clear
@@ -671,15 +686,6 @@ optimize_system_performance() {
 		vm.dirty_ratio=10
 		vm.dirty_background_ratio=5
 		vm.page-cluster=0
-	EOL
-    sleep 1
-
-    # Configure Cloudflare DNS in NetworkManager
-    processing_msg "Configuring Cloudflare DNS as default fallback..."
-    mkdir -p /mnt/etc/NetworkManager/conf.d
-    cat >> /mnt/etc/NetworkManager/conf.d/dns-servers.conf <<- 'EOL'
-		[global-dns-domain-*]
-		servers=1.1.1.1,1.0.0.1
 	EOL
     sleep 1
 

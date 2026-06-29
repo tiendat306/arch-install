@@ -31,7 +31,9 @@ readonly LOG_FILE="/tmp/arch_install.log"
 log_to_file() {
     local level="${1:?}"
     local msg="${2:?}"
-    printf '[%s] [%-12s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" >> "$LOG_FILE"
+    local clean_msg
+    clean_msg=$(printf '%s' "$msg" | sed -E 's/\x1b(\[[0-9;]*[a-zA-Z]|\([a-zA-Z])//g')
+    printf '[%s] [%-12s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$clean_msg" >> "$LOG_FILE"
 }
 
 log_command() {
@@ -359,6 +361,7 @@ install_base_system() {
     processing_msg "Updating pacman mirrors via reflector (VN/SG/JP)..."
     if ! log_command "Reflector mirror update" reflector --verbose --latest 10 \
                   --country "Vietnam,Singapore,Japan" \
+                  --protocol https \
                   --sort rate \
                   --save /etc/pacman.d/mirrorlist; then
         warning_msg "Reflector failed to update mirrors. Using default Live USB mirrorlist."
@@ -564,6 +567,7 @@ refresh_mirrors() {
     processing_msg "Selecting fastest package mirrors inside chroot (reflector)..."
     log_command "Regenerating mirror list inside chroot" $CHROOT reflector --verbose --latest 10 \
         --country "Vietnam,Singapore,Japan" \
+        --protocol https \
         --sort rate \
         --save /etc/pacman.d/mirrorlist
     sleep 1
@@ -879,6 +883,7 @@ while true; do
             ;;
     esac
 done
+
 printf '\n'
 
 # Ask if user wants to reboot

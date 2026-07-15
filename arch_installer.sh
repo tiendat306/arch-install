@@ -376,7 +376,7 @@ install_base_system() {
         mkinitcpio \
         networkmanager \
         reflector \
-        zsh git vim \
+        zsh git nano \
         zram-generator; then
         error_msg "pacstrap failed! The base system could not be installed."
         error_msg "This is usually caused by network/mirrorlist issues or insufficient disk space."
